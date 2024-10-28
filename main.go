@@ -9,7 +9,6 @@ import (
 
 	"github.com/gorilla/mux"
 	loggly "github.com/jamespearly/loggly"
-	"github.com/joho/godotenv"
 )
 
 type statusResponseWriter struct {
@@ -25,11 +24,6 @@ type Status struct {
 var logglyClient *loggly.ClientType = nil
 
 func main() {
-	// Load env file
-	errEnvFile := godotenv.Load(".env")
-	if errEnvFile != nil {
-		panic(errEnvFile)
-	}
 
 	// Set up Loggly
 	tag := "CSC482Server"
@@ -43,7 +37,8 @@ func main() {
 	r.HandleFunc("/pphyo/status", getStatus).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(getPageNotFound).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(notAllowedotherMethods)
-	http.ListenAndServe(":8080", r)
+	log.Fatal(http.ListenAndServe(":8080", r))
+	
 }
 
 // NewStatusResponseWriter returns pointer to a new statusResponseWriter object
@@ -102,7 +97,7 @@ func RequestLoggerMiddleware(r *mux.Router) mux.MiddlewareFunc {
 						req.Method,
 						time.Since(start),
 						sw.statusCode,
-						req.Host,
+						req.RemoteAddr,
 						req.URL.Path,
 						req.URL.RawQuery,
 					))
