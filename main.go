@@ -51,10 +51,24 @@ func main() {
 		log.Printf("logglyClient is nil")
 	}
 
+	// AWS DyanmoDB Setup
+	cfg, err := config.LoadDefaultConfig(context.TODO(), func(o *config.LoadOptions) error {
+        o.Region = "us-east-1"
+        return nil
+    })
+    if err != nil {
+        panic(err)
+    }
+	svc := dynamodb.NewFromConfig(cfg)
+	if svc == nil {
+		panic("The dynamodb configuration were not setup properly")
+	}
+
+	server := Server{logglyClient, svc}
+
 	r := mux.NewRouter()
 	r.Use(server.RequestLoggerMiddleware(r))
-	r.HandleFunc("/pphyo/status", getStatus).Methods(http.MethodGet)
-	r.HandleFunc("/pphyo/all", server.getAll).Methods(http.MethodGet)
+	r.HandleFunc("/pphyo/status", server.getStatus).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(getPageNotFound).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(notAllowedotherMethods)
 	log.Fatal(http.ListenAndServe(":8080", r))
@@ -75,17 +89,7 @@ func (sw *statusResponseWriter) WriteHeader(statusCode int) {
 	sw.ResponseWriter.WriteHeader(statusCode)
 }
 
-func getStatus(rw http.ResponseWriter, req *http.Request) {
-
-	sw := NewStatusResponseWriter(rw)
-	status := Status{time.Now(), sw.statusCode}
-
-	rw.WriteHeader(http.StatusOK)
-	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(status)
-}
-
-func (s *Server) getAll(rw http.ResponseWriter, req *http.Request) {
+func (s *Server) getStatus(rw http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
 	defer cancel()
 
