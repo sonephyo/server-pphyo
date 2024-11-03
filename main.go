@@ -16,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/gorilla/mux"
-	// "github.com/microcosm-cc/bluemonday"
 
 	loggly "github.com/jamespearly/loggly"
 	"github.com/joho/godotenv"
@@ -158,8 +157,6 @@ func (s *Server) getSearch(rw http.ResponseWriter, req *http.Request) {
 	defer cancel()
 
 	queries := req.URL.Query()
-
-	// p := bluemonday.UGCPolicy()
 	
 	// Clearing data to fit according
 	if !queries.Has("filter") {
@@ -167,7 +164,7 @@ func (s *Server) getSearch(rw http.ResponseWriter, req *http.Request) {
 		rw.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(rw).Encode(ErrorResponse {
 			http.StatusBadRequest,
-			fmt.Errorf("error: %s", "query parameter `filter` is not included").Error(),
+			fmt.Errorf("error: %s. %s", "query parameter `filter` is not included", "Choose from the following supported filters - price, taker-side, time-exchange").Error(),
 		})
 		return
 	}
@@ -181,7 +178,7 @@ func (s *Server) getSearch(rw http.ResponseWriter, req *http.Request) {
 	case "taker-side":
 		result, err = s.getSearchByTakerSide(ctx, queries)
 	case "time-exchange":
-		// Do something
+		result, err = s.getSearchByTimeExchange(ctx, queries)
 	default:
 		err = fmt.Errorf("error: query `%s` is invalid", queries.Get("filter"))
 	}
@@ -248,6 +245,45 @@ func (s *Server) getSearchByTakerSide(ctx context.Context, queries url.Values) (
 		FilterExpression: aws.String("taker_side = :takerSide"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":takerSide":        &types.AttributeValueMemberS{Value: queries.Get("type")},
+		},
+	})
+	return result, err
+}
+
+func (s *Server) getSearchByTimeExchange(ctx context.Context, queries url.Values) (*dynamodb.ScanOutput, error) {
+
+
+	for key := range queries {
+		if key != "filter" && key != "start-date" && key != "end-date" {
+			return nil, fmt.Errorf("error: %s", "`start-date` and `end-date` can only exists for filter `time-exchange`")
+		}
+    }
+
+
+	if !queries.Has("start-date"){
+		queries.Add("start-date", "0000-01-01T00:00:00Z")
+	}
+	if !queries.Has("end-date"){
+		queries.Add("end-date", "9999-12-31T23:59:59Z")
+	}
+
+	// Helper method for checking if the dates are in valid format
+	isValidDate := func (dateStr string) bool {
+		_, err := time.Parse("2006-01-02T15:04:05Z", dateStr) // ISO 8601 format
+		return err == nil
+	}
+
+	if !isValidDate(queries.Get("start-date")) || !isValidDate(queries.Get("end-date")) {
+		return nil, fmt.Errorf("error: %s", "the dates are not in valid format. (Format: 0000-01-01T00:00:00Z)")
+	}
+
+
+	result, err := s.svc.Scan(ctx, &dynamodb.ScanInput{
+		TableName: aws.String("pphyo_ETH_tradeEntries"),
+		FilterExpression: aws.String("time_exchange > :startDate AND time_exchange < :endDate"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":startDate":        &types.AttributeValueMemberS{Value: queries.Get("start-date")},
+			":endDate":        &types.AttributeValueMemberS{Value: queries.Get("end-date")},
 		},
 	})
 	return result, err
