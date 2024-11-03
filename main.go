@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/gorilla/mux"
+	// "github.com/microcosm-cc/bluemonday"
 
 	loggly "github.com/jamespearly/loggly"
 	"github.com/joho/godotenv"
@@ -47,6 +49,11 @@ type TradeEntry struct {
     Price        float64   `json:"price" dynamodbav:"price"`
     Size         float64   `json:"size" dynamodbav:"size"`
     TakerSide    string    `json:"taker_side" dynamodbav:"taker_side"`
+}
+
+type ErrorResponse struct {
+	HttpStatus int `json:"httpStatus"`
+	ErrorDescription string `json:"errorDescription"`
 }
 
 
@@ -105,7 +112,7 @@ func (sw *statusResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (s *Server) getStatus(rw http.ResponseWriter, req *http.Request) {
-	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 	defer cancel()
 
 	result,err := s.svc.DescribeTable(ctx, &dynamodb.DescribeTableInput{
@@ -151,18 +158,39 @@ func (s *Server) getSearch(rw http.ResponseWriter, req *http.Request) {
 	defer cancel()
 
 	queries := req.URL.Query()
-	
 
-	result, err := s.svc.Scan(ctx, &dynamodb.ScanInput{
-		TableName: aws.String("pphyo_ETH_tradeEntries"),
-		FilterExpression: aws.String("price > :priceValue"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":priceValue":        &types.AttributeValueMemberN{Value: queries.Get("value")},
-		},
-	})
+	// p := bluemonday.UGCPolicy()
+	
+	// Clearing data to fit according
+	if !queries.Has("filter") {
+		rw.WriteHeader(http.StatusBadRequest)
+		rw.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(rw).Encode(ErrorResponse {
+			http.StatusBadRequest,
+			fmt.Errorf("error: %s", "query parameter `filter` is not included").Error(),
+		})
+		return
+	}
+
+	var result *dynamodb.ScanOutput
+	var err error
+
+	switch queries.Get("filter") {
+	case "price":
+		result, err = s.getSearchByPrice(ctx, queries)
+	case "taker-side":
+		result, err = s.getSearchByTakerSide(ctx, queries)
+	case "time-exchange":
+		// Do something
+	default:
+		err = fmt.Errorf("error: query `%s` is invalid", queries.Get("filter"))
+	}
 	
 	if err != nil {
-		panic("Error: " + err.Error())
+		rw.WriteHeader(http.StatusBadRequest)
+		rw.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(rw).Encode(ErrorResponse{http.StatusBadRequest, err.Error()})
+		return
 	}
 
 	items := result.Items
