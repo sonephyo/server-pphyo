@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/gorilla/mux"
 
@@ -82,6 +83,7 @@ func main() {
 	r.Use(server.RequestLoggerMiddleware(r))
 	r.HandleFunc("/pphyo/status", server.getStatus).Methods(http.MethodGet)
 	r.HandleFunc("/pphyo/all", server.getAll).Methods(http.MethodGet)
+	r.HandleFunc("/pphyo/search", server.getSearch).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(getPageNotFound).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(notAllowedotherMethods)
 	log.Fatal(http.ListenAndServe(":8080", r))
@@ -138,11 +140,37 @@ func (s *Server) getAll(rw http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		panic ("Error in unmarshalling the list of maps")
 	}
+
+	rw.WriteHeader(http.StatusOK)
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(tradeEntries)
+}
+
+func (s *Server) getSearch(rw http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+
+	queries := req.URL.Query()
 	
-	for key, item := range tradeEntries {
-		fmt.Println(key, item)
+
+	result, err := s.svc.Scan(ctx, &dynamodb.ScanInput{
+		TableName: aws.String("pphyo_ETH_tradeEntries"),
+		FilterExpression: aws.String("price > :priceValue"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":priceValue":        &types.AttributeValueMemberN{Value: queries.Get("value")},
+		},
+	})
+	
+	if err != nil {
+		panic("Error: " + err.Error())
 	}
 
+	items := result.Items
+	var tradeEntries []TradeEntry
+	err = attributevalue.UnmarshalListOfMaps(items, &tradeEntries)
+	if err != nil {
+		panic ("Error in unmarshalling the list of maps")
+	}
 
 	rw.WriteHeader(http.StatusOK)
 	rw.Header().Set("Content-Type", "application/json")
