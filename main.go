@@ -10,8 +10,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+
 	"github.com/gorilla/mux"
+
 	loggly "github.com/jamespearly/loggly"
 	"github.com/joho/godotenv"
 )
@@ -34,6 +37,15 @@ type EP_Status struct {
 type Server struct {
 	logglyClient *loggly.ClientType
 	svc *dynamodb.Client
+}
+
+type TradeEntry struct {
+    TimeExchange time.Time `json:"time_exchange" dynamodbav:"time_exchange"`
+    TimeCoinAPI  time.Time `json:"time_coinapi" dynamodbav:"time_coinapi"`
+    UUID         string    `json:"uuid" dynamodbav:"uuid"`
+    Price        float64   `json:"price" dynamodbav:"price"`
+    Size         float64   `json:"size" dynamodbav:"size"`
+    TakerSide    string    `json:"taker_side" dynamodbav:"taker_side"`
 }
 
 
@@ -69,6 +81,7 @@ func main() {
 	r := mux.NewRouter()
 	r.Use(server.RequestLoggerMiddleware(r))
 	r.HandleFunc("/pphyo/status", server.getStatus).Methods(http.MethodGet)
+	r.HandleFunc("/pphyo/all", server.getAll).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(getPageNotFound).Methods(http.MethodGet)
 	r.PathPrefix("/").HandlerFunc(notAllowedotherMethods)
 	log.Fatal(http.ListenAndServe(":8080", r))
@@ -99,13 +112,41 @@ func (s *Server) getStatus(rw http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		panic("Error: " + err.Error())
 	}
-	fmt.Println(*result.Table.ItemCount)
 
 	ep_status := EP_Status{*result.Table.TableName, *result.Table.ItemCount}
 
 	rw.WriteHeader(http.StatusOK)
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(ep_status)
+}
+
+func (s *Server) getAll(rw http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+
+	result,err := s.svc.Scan(ctx, &dynamodb.ScanInput{
+		TableName: aws.String("pphyo_ETH_tradeEntries"),
+
+	})
+	if err != nil {
+		panic("Error: " + err.Error())
+	}
+
+	items := result.Items
+	var tradeEntries []TradeEntry
+	err = attributevalue.UnmarshalListOfMaps(items, &tradeEntries)
+	if err != nil {
+		panic ("Error in unmarshalling the list of maps")
+	}
+	
+	for key, item := range tradeEntries {
+		fmt.Println(key, item)
+	}
+
+
+	rw.WriteHeader(http.StatusOK)
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(tradeEntries)
 }
 
 func getPageNotFound(rw http.ResponseWriter, req *http.Request) {
