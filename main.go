@@ -205,6 +205,54 @@ func (s *Server) getSearch(rw http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(rw).Encode(tradeEntries)
 }
 
+func (s *Server) getSearchByPrice(ctx context.Context, queries url.Values) (*dynamodb.ScanOutput, error) {
+
+	for key := range queries {
+		if key != "filter" && key != "min-val" && key != "max-val" {
+			return nil, fmt.Errorf("error: %s", "`min-val` and `max-val` can only exists for filter `price`")
+		}
+    }
+	if !queries.Has("min-val"){
+		queries.Add("min-val", "0")
+	}
+	if !queries.Has("max-val"){
+		queries.Add("max-val", "1000000")
+	}
+	
+	result, err := s.svc.Scan(ctx, &dynamodb.ScanInput{
+		TableName: aws.String("pphyo_ETH_tradeEntries"),
+		FilterExpression: aws.String("price > :minValue AND price < :maxValue"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":minValue":        &types.AttributeValueMemberN{Value: queries.Get("min-val")},
+			":maxValue":        &types.AttributeValueMemberN{Value: queries.Get("max-val")},
+
+		},
+	})
+	return result, err
+}
+
+func (s *Server) getSearchByTakerSide(ctx context.Context, queries url.Values) (*dynamodb.ScanOutput, error) {
+
+	for key := range queries {
+		if key != "filter" && key != "type" {
+			return nil, fmt.Errorf("error: %s", "`type` can only exists for filter `taker-side`")
+		}
+    }
+
+	if !queries.Has("type") {
+		return nil, fmt.Errorf("error: %s", "specify `BUY` or `SELL` for query `type`")
+	}
+
+	result, err := s.svc.Scan(ctx, &dynamodb.ScanInput{
+		TableName: aws.String("pphyo_ETH_tradeEntries"),
+		FilterExpression: aws.String("taker_side = :takerSide"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":takerSide":        &types.AttributeValueMemberS{Value: queries.Get("type")},
+		},
+	})
+	return result, err
+}
+
 func getPageNotFound(rw http.ResponseWriter, req *http.Request) {
 	sw := NewStatusResponseWriter(rw)
 	sw.WriteHeader(http.StatusNotFound)
