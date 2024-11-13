@@ -1,5 +1,5 @@
 # Stage 1: Build the Go application using a smaller base image
-FROM golang:1.22.5-alpine AS builder
+FROM public:ecr.aws/docker/library/alpine:latest AS builder
 
 # Set the working directory inside the container
 WORKDIR /app
